@@ -1,92 +1,86 @@
-# =====================================================
-# 単位管理ツール Web版（Streamlit版）
-# -----------------------------------------------------
-# 機能：
-# ① 「進級」or「卒業」モードを選択可能
-# ② 講義リスト(courses.txt)から取得済み講義をチェック形式で選択
-# ③ 必要／取得／残り単位を自動計算
-# ④ B0余剰単位をB1に自動充当
-# =====================================================
-
 import streamlit as st
-from tool import read_requirements, read_courses, calculate_credits, apply_b0_overflow
+import pandas as pd
+from tannabi import read_requirements, read_courses, calculate_credits
 
-# -----------------------------------------------------
-# タイトル
-# -----------------------------------------------------
-st.title("🎓 単位管理ツール Web版")
+# ==============================
+# 単位管理ツール Web版（タブ切り替え）
+# ==============================
 
-# -----------------------------------------------------
-# 進級／卒業モード選択
-# -----------------------------------------------------
-mode = st.radio("判定モードを選択してください", ("進級", "卒業"))
-req_file = "requirements2.txt" if mode == "進級" else "requirements1.txt"
+st.set_page_config(page_title="単位管理ツール", layout="wide")
 
-# -----------------------------------------------------
-# 学籍番号入力（データ分離用）
-# -----------------------------------------------------
-student_id = st.text_input("学籍番号を入力してください")
+st.title("🎓 単位管理ツール")
+st.markdown("進級・卒業に必要な単位を区分ごとに管理・確認できます。")
 
-# -----------------------------------------------------
-# 講義データ読み込み
-# -----------------------------------------------------
+# === モード選択 ===
+mode = st.radio("要件を選択してください", ["進級要件", "卒業要件"], horizontal=True)
+req_file = "requirements2.txt" if mode == "進級要件" else "requirements1.txt"
 required = read_requirements(req_file)
-courses = read_courses()
 
-st.markdown("---")
-st.header("📘 取得済み講義を選択してください")
+# === 学籍番号入力 ===
+student_id = st.text_input("学籍番号を入力してください", placeholder="例: 1234567")
 
-# -----------------------------------------------------
-# 講義選択フォーム
-# -----------------------------------------------------
+# === 講義データ読み込み ===
+courses = read_courses("courses.txt")
+
+# === タブ作成 ===
+tab_names = list(courses.keys())
+tabs = st.tabs(tab_names)
+
 earned_courses = {}
-for cat, subject_list in courses.items():
-    st.subheader(f"【{cat}区分】")
-    if len(subject_list) == 0:
-        st.write("（この区分には登録された講義がありません）")
-        continue
-    selected = st.multiselect(
-        f"{cat}区分の講義を選択",
-        options=[name for name, _ in subject_list],
-        key=cat
-    )
-    earned_courses[cat] = [(name, credit) for name, credit in subject_list if name in selected]
 
-# -----------------------------------------------------
-# 実行ボタン
-# -----------------------------------------------------
-if st.button("結果を表示"):
-    # 各区分の取得単位を集計
+for tab, cat in zip(tabs, tab_names):
+    with tab:
+        st.markdown(f"### {cat}区分")
+        options = [f"{name}（{credit}単位）" for name, credit in courses[cat]]
+        selected = st.multiselect(
+            f"{cat}区分で取得した講義を選択してください",
+            options,
+            key=f"select_{cat}"
+        )
+
+        earned_courses[cat] = []
+        for sel in selected:
+            name = sel.split("（")[0]
+            credit = int(sel.split("（")[1].replace("単位）", ""))
+            earned_courses[cat].append((name, credit))
+
+# === 結果表示ボタン ===
+st.divider()
+if st.button("📊 結果を表示"):
     earned = calculate_credits(earned_courses)
-    overflow = apply_b0_overflow(required, earned)
 
-    st.markdown("---")
-    st.header("📊 結果")
-
-    for cat in ["A", "B0", "B1", "C"]:
-        need = required.get(cat, 0)
+    st.subheader("📈 区分別集計結果")
+    result_rows = []
+    for cat in required:
+        need = required[cat]
         got = earned.get(cat, 0)
+        remain = max(0, need - got)
+        result_rows.append({"区分": cat, "必要": need, "取得": got, "残り": remain})
+    df = pd.DataFrame(result_rows)
 
-        # B1はB0の余剰分を加算して表示
-        if cat == "B1":
-            surplus = overflow["surplus_b0"]
-            eff = overflow["eff_b1"]
-            remain = overflow["remain_b1"]
-            st.write(
-                f"**{cat}区分:** 必要 {need} / 取得 {got} "
-                f"（B0余剰 +{surplus} → 実効 {eff}） / 残り {remain}"
-            )
+    col1, col2 = st.columns(2)
+    with col1:
+        st.table(df)
+    with col2:
+        st.bar_chart(df.set_index("区分")[["必要", "取得"]])
+
+    # === 未取得科目リスト ===
+    st.subheader("📚 未取得科目一覧")
+    for cat in courses:
+        taken_names = {name for name, _ in earned_courses.get(cat, [])}
+        remaining = [name for name, _ in courses[cat] if name not in taken_names]
+        if remaining:
+            st.markdown(f"**{cat}区分:** {', '.join(remaining)}")
         else:
-            remain = max(0, need - got)
-            st.write(f"**{cat}区分:** 必要 {need} / 取得 {got} / 残り {remain}")
+            st.markdown(f"**{cat}区分:** ✅ 全て取得済み！")
 
-    st.markdown("---")
-
-    # 合計単位（目安）も出しておくと便利
-    total_required = sum(required.values())
-    total_earned = sum(earned.values())
-    st.subheader(f"📈 総取得単位数： {total_earned} / {total_required}")
-
-    st.success("判定が完了しました！")
-
-
+    # === 保存機能 ===
+    if student_id:
+        filename = f"taken_{student_id}.txt"
+        with open(filename, "w", encoding="utf-8") as f:
+            for cat, subjects in earned_courses.items():
+                for name, credit in subjects:
+                    f.write(f"{cat} {name} {credit}\n")
+        st.success(f"✅ データを保存しました（{filename}）")
+    else:
+        st.warning("⚠ 学籍番号を入力するとデータを保存できます。")
