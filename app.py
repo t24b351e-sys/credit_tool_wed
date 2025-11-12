@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from tannabi import read_requirements, read_courses, calculate_credits
+from tool import read_requirements, read_courses, calculate_credits
 
 # ==============================
 # 単位管理ツール Web版
