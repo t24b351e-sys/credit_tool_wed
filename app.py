@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import re
 from tool import read_requirements, read_courses, calculate_credits
 
 # ==============================
@@ -40,8 +41,17 @@ for tab, cat in zip(tabs, tab_names):
 
         earned_courses[cat] = []
         for sel in selected:
+            # 科目名取得
             name = sel.split("（")[0]
-            credit = int(sel.split("（")[1].replace("単位）", ""))
+
+            # 正規表現で数字抽出
+            match = re.search(r'(\d+)', sel)
+            if match:
+                credit = int(match.group(1))
+            else:
+                credit = 0
+                st.warning(f"⚠ 単位が取得できませんでした: {sel}")
+
             earned_courses[cat].append((name, credit))
 
 # === 結果表示ボタン ===
