@@ -7,7 +7,6 @@ from tool import read_requirements, read_courses, calculate_credits
 st.set_page_config(page_title="単位管理ツール", layout="wide")
 st.title(" 単ナビ")
 
-# 表示名
 DISPLAY = {
     "A":  "A(必修科目)",
     "B0": "B(専門基礎科目)",
@@ -24,7 +23,6 @@ req_file = "requirements2.txt" if mode == "進級要件" else "requirements1.txt
 required = read_requirements(req_file)
 
 student_id = st.text_input("学籍番号を入力してください", placeholder="例: 1234567")
-
 courses = read_courses("courses.txt")
 
 # 保存データ読み込み
@@ -44,10 +42,8 @@ if student_id:
         st.info(" 保存データはありません（初回利用と思われます）。")
 
 st.subheader("取得済み講義を選択してください")
-
 earned_courses = {}
 
-# 表示順はDISPLAYの順で回す（coursesに無い区分はスキップ）
 for cat in ["A", "B0", "B1", "C", "D", "E"]:
     subject_list = courses.get(cat, [])
     st.markdown(f"### {disp(cat)}")
@@ -56,22 +52,24 @@ for cat in ["A", "B0", "B1", "C", "D", "E"]:
         earned_courses[cat] = []
         continue
 
-    # 保存済みを除いた選択肢
-    taken_names = set(loaded_taken.get(cat, []))
-    options = [f"{name}（{credit}単位）" for name, credit in subject_list if name not in taken_names]
+    # 保存済み科目は削除できるよう multiselect に表示
+    saved_names = set(loaded_taken.get(cat, []))
+    all_options = [f"{name}（{credit}単位）" for name, credit in subject_list]
 
+    # multiselect で選択済み科目を削除可能にする
+    default_selected = [f"{name}（{credit}単位）" for name, credit in subject_list if name in saved_names]
     selected = st.multiselect(
-        f"{disp(cat)}で取得した講義を選択",
-        options,
+        f"{disp(cat)}で取得した講義を選択（チェックを外すと削除）",
+        all_options,
+        default=default_selected,
         key=f"sel_{cat}"
     )
 
-    # まず保存済み分
-    earned_courses[cat] = [(name, credit) for name, credit in subject_list if name in taken_names]
-    # 今回の選択分（単位を文字列から抽出：\d+ でOK）
+    # 選択結果を earned_courses に保存
+    earned_courses[cat] = []
     for sel in selected:
         name = sel.split("（")[0]
-        m = re.search(r"(\d+)", sel)     # ← 修正：バックスラッシュ1つ
+        m = re.search(r"(\d+)", sel)
         credit = int(m.group(1)) if m else 0
         earned_courses[cat].append((name, credit))
 
@@ -97,6 +95,7 @@ if st.button("結果を表示"):
         st.write(f"取得済み: {', '.join(taken_now) if taken_now else 'なし'}")
         st.write(f"未取得: {', '.join(remaining) if remaining else 'すべて取得済み'}")
 
+    # 保存
     if student_id:
         filename = f"taken_{student_id}.txt"
         with open(filename, "w", encoding="utf-8") as f:
