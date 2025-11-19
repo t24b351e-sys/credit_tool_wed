@@ -7,27 +7,21 @@ from tool import read_requirements, read_courses, calculate_credits
 st.set_page_config(page_title="単位管理ツール", layout="wide")
 st.title("🎓 単位管理ツール（進級／卒業対応版・保存機能つき）")
 
-# === 要件選択 ===
 mode = st.radio("要件を選択してください", ["進級要件", "卒業要件"])
 req_file = "requirements2.txt" if mode == "進級要件" else "requirements1.txt"
 required = read_requirements(req_file)
 
-# === 学籍番号 ===
 student_id = st.text_input("学籍番号を入力してください", placeholder="例: 1234567")
 
-# === 講義データ読み込み ===
 courses = read_courses("courses.txt")
 
-# -----------------------------
-# 🔄 保存ファイル読み込み（復元）
-# -----------------------------
+# 🔄 保存データ読み込み
 loaded_taken = {}
 if student_id:
     filename = f"taken_{student_id}.txt"
     if os.path.exists(filename):
         with open(filename, "r", encoding="utf-8") as f:
             for line in f:
-                # 科目名にスペースが含まれても壊れない分割
                 parts = line.strip().rsplit(" ", 2)
                 if len(parts) != 3:
                     continue
@@ -37,9 +31,6 @@ if student_id:
     else:
         st.info("ℹ 保存データはありません（初回利用と思われます）。")
 
-# -----------------------------
-# UI：科目選択（自動復元つき）
-# -----------------------------
 st.subheader("取得済み講義を選択してください")
 
 earned_courses = {}
@@ -47,18 +38,12 @@ earned_courses = {}
 for cat, subject_list in courses.items():
     st.markdown(f"### [{cat}]区分")
 
-    # 選択肢
-    options = [f"{name}（{credit}単位）" for name, credit in subject_list]
+    # 🔥 保存済み科目を除外した選択肢
+    taken_names = set(loaded_taken.get(cat, []))
+    options = [f"{name}（{credit}単位）" for name, credit in subject_list if name not in taken_names]
 
-    # 🔥 自動復元（保存されている科目と完全一致したものを選択状態に）
-    default_selected = []
-    if cat in loaded_taken:
-        saved_names = set(loaded_taken[cat])
-        for name, credit in subject_list:
-            if name in saved_names:
-                default_selected.append(f"{name}（{credit}単位）")
+    default_selected = []  # 保存済みは除外しているので初期値は空
 
-    # multiselect
     selected = st.multiselect(
         f"{cat}区分で取得した講義を選択",
         options,
@@ -66,17 +51,14 @@ for cat, subject_list in courses.items():
         key=f"sel_{cat}"
     )
 
-    # 選択結果を整理
-    earned_courses[cat] = []
+    # 保存済みと今回選択をマージ
+    earned_courses[cat] = [(name, credit) for name, credit in subject_list if name in taken_names]
     for sel in selected:
         name = sel.split("（")[0]
         m = re.search(r"(\\d+)", sel)
         credit = int(m.group(1)) if m else 0
         earned_courses[cat].append((name, credit))
 
-# -----------------------------
-# 📊 結果表示 & 保存
-# -----------------------------
 if st.button("結果を表示"):
     earned = calculate_credits(earned_courses)
 
@@ -91,19 +73,17 @@ if st.button("結果を表示"):
 
     st.subheader("📚 詳細")
     for cat in courses:
-        taken_names = {name for name, _ in earned_courses.get(cat, [])}
-        remaining = [name for name, _ in courses[cat] if name not in taken_names]
+        taken_now = {name for name, _ in earned_courses.get(cat, [])}
+        remaining = [name for name, _ in courses[cat] if name not in taken_now]
         st.markdown(f"#### [{cat}]区分")
-        st.write(f"取得済み: {', '.join(taken_names) if taken_names else 'なし'}")
+        st.write(f"取得済み: {', '.join(taken_now) if taken_now else 'なし'}")
         st.write(f"未取得: {', '.join(remaining) if remaining else 'すべて取得済み'}")
 
-    # 🔥 保存（科目名にスペースがあっても正しく記録）
     if student_id:
         filename = f"taken_{student_id}.txt"
         with open(filename, "w", encoding="utf-8") as f:
             for cat, subs in earned_courses.items():
                 for name, credit in subs:
-                    # スペースを含む科目名にも対応
                     f.write(f"{cat} {name} {credit}\n")
         st.success(f"💾 データを保存しました！（{filename}）")
     else:
