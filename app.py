@@ -1,99 +1,112 @@
-# app.py
 import streamlit as st
-from tool import (
-    read_requirements, read_courses, calculate_credits,
-    cascade_allocation, compute_bundle,
-    PROG_BCE_MIN, GRAD_BCDE_MIN
-)
+import pandas as pd
+import os
+import re
+from tool import read_requirements, read_courses, calculate_credits
 
-st.title("単ナビ")
+# ==============================
+# 単位管理ツール Web版（保存 & 復元つき）
+# ==============================
 
-# モード選択
-mode_label = st.radio("判定モード", ("進級", "卒業"))
-mode = "p" if mode_label == "進級" else "g"
-req_file = "requirements2.txt" if mode == "p" else "requirements1.txt"
+st.set_page_config(page_title="単位管理ツール", layout="wide")
+st.title("🎓 単位管理ツール（進級／卒業対応版・保存機能つき）")
 
-# 学籍番号（任意）
-student_id = st.text_input("学籍番号（任意）")
-
-# データ読み込み
+# === モード選択 ===
+mode = st.radio("要件を選択してください", ["進級要件", "卒業要件"])
+req_file = "requirements2.txt" if mode == "進級要件" else "requirements1.txt"
 required = read_requirements(req_file)
-courses  = read_courses()
 
-st.markdown("---")
-st.header("取得済み講義を選択")
+# === 学籍番号入力 ===
+student_id = st.text_input("学籍番号を入力してください", placeholder="例: 1234567")
 
-# 講義選択UI
-earned_courses = {}
-for cat in ["A", "B0", "B1", "C", "D", "E"]:
-    lst = courses.get(cat, [])
-    st.subheader(f"{cat}区分")
-    if not lst:
-        st.caption("登録講義なし")
-        earned_courses[cat] = []
-        continue
-    opts = [name for name, _ in lst]
-    selected = st.multiselect(f"{cat}区分の講義を選択", options=opts, key=f"ms_{cat}")
-    earned_courses[cat] = [(name, cr) for name, cr in lst if name in selected]
+# === 講義データ読み込み ===
+courses = read_courses("courses.txt")
 
-if st.button("結果を表示"):
-    # 集計 → 段階的充当 → 合算要件
-    earned = calculate_credits(earned_courses)
-    cas = cascade_allocation(required, earned)
-    bundle_label, bundle_total, bundle_need, bundle_ok = compute_bundle(mode, earned, cas)
+# --------------------------
+#  🔄 学籍番号入力時に保存ファイルを読み込み
+# --------------------------
+loaded_taken = {}  # {カテゴリ: [科目名,…]}
 
-    st.markdown("---")
-    st.header("結果")
-
-    # A, B0, B1, C, D, E
-    for cat in ["A", "B0", "B1", "C", "D", "E"]:
-        need = required.get(cat, 0)
-        got  = earned.get(cat, 0)
-
-        if cat == "B0":
-            remain = max(0, need - got)
-            st.write(f"B(専門基礎科目): 必要 {need} / 取得 {got} / 残り {remain} ・ 余剰 {cas['b0_surplus']}")
-
-        elif cat == "B1":
-            if cas["b1_short"] > 0:
-                st.write(
-                    f"B(専門応用科目): 必要 {need} / 取得 {got} / B(専門基礎科目)からの充当後 {cas['b1_after_fill']} / 残り {cas['b1_short']}"
-                )
-            else:
-                st.write(
-                    f"B(専門応用科目): 必要 {need} / 取得 {got} / 残り 0 ・ 合算に用いるB(専門応用科目)余剰 {cas['b1_surplus_for_bundle']}"
-                )
-
-        elif cat == "C":
-            # Cは取得のみ
-            st.write(f"C区分: 取得 {got}")
-
-        else:
-            remain = max(0, need - got)
-            st.write(f"{cat}区分: 必要 {need} / 取得 {got} / 残り {remain}")
-
-    st.markdown("---")
-    st.subheader("合算要件の判定")
-    if mode == "p":
-        st.caption(f"基準：B(専門応用科目)余剰分 + C + E ≥ {PROG_BCE_MIN}")
+if student_id:
+    filename = f"taken_{student_id}.txt"
+    if os.path.exists(filename):
+        with open(filename, "r", encoding="utf-8") as f:
+            for line in f:
+                cat, name, credit = line.strip().split(" ")
+                loaded_taken.setdefault(cat, []).append(name)
+        st.success("📂 保存されたデータを読み込みました！")
     else:
-        st.caption(f"基準：B(専門応用科目)余剰分 + C + D + E ≥ {GRAD_BCDE_MIN}")
+        st.info("ℹ 保存データはありません（初回利用と思われます）。")
 
-    passed_text = "達成" if bundle_ok else "未達成"
-    st.write(f"{bundle_label}: 合計 {bundle_total} / 基準 {bundle_need} → {passed_text}")
 
-    # 未取得講義
-    st.markdown("---")
-    st.subheader("未取得の講義")
-    any_missing = False
-    for cat in ["A", "B0", "B1", "C", "D", "E"]:
-        lst = courses.get(cat, [])
-        taken = {n for n, _ in earned_courses.get(cat, [])}
-        remaining = [n for n, _ in lst if n not in taken]
-        if remaining:
-            any_missing = True
-            st.markdown(f"{cat}区分")
-            for n in remaining:
-                st.write(f"- {n}")
-    if not any_missing:
-        st.write("未取得の講義はありません")
+# ==========================
+# UI：科目選択（保存内容を復元）
+# ==========================
+st.subheader("取得済み講義を選択してください")
+
+earned_courses = {}
+
+for cat, subject_list in courses.items():
+    st.markdown(f"### [{cat}]区分")
+
+    # 選択肢（例: "線形代数（2単位）"）
+    options = [f"{name}（{credit}単位）" for name, credit in subject_list]
+
+    # 保存データがあれば、それを multiselect の初期値にする
+    default_selected = []
+    if cat in loaded_taken:
+        for name, credit in subject_list:
+            if name in loaded_taken[cat]:
+                default_selected.append(f"{name}（{credit}単位）")
+
+    selected = st.multiselect(
+        f"{cat}区分で取得した講義を選択",
+        options,
+        default=default_selected,  # ← 復元機能
+        key=f"sel_{cat}"
+    )
+
+    # 選択結果を解析（安全な正規表現）
+    earned_courses[cat] = []
+    for sel in selected:
+        name = sel.split("（")[0]
+        m = re.search(r"(\d+)", sel)
+        credit = int(m.group(1)) if m else 0
+        earned_courses[cat].append((name, credit))
+
+
+# ==========================
+# 📊 結果表示 & 保存
+# ==========================
+if st.button("結果を表示"):
+    earned = calculate_credits(earned_courses)
+
+    # --- 集計表 ---
+    st.subheader("📊 結果")
+    rows = []
+    for cat in required:
+        need = required[cat]
+        got = earned.get(cat, 0)
+        remain = max(0, need - got)
+        rows.append({"区分": cat, "必要": need, "取得": got, "残り": remain})
+    st.table(pd.DataFrame(rows))
+
+    # --- 詳細 ---
+    st.subheader("📚 詳細")
+    for cat in courses:
+        taken_names = {name for name, _ in earned_courses.get(cat, [])}
+        remaining = [name for name, _ in courses[cat] if name not in taken_names]
+        st.markdown(f"#### [{cat}]区分")
+        st.write(f"取得済み: {', '.join(taken_names) if taken_names else 'なし'}")
+        st.write(f"未取得: {', '.join(remaining) if remaining else 'すべて取得済み'}")
+
+    # --- 保存機能 ---
+    if student_id:
+        filename = f"taken_{student_id}.txt"
+        with open(filename, "w", encoding="utf-8") as f:
+            for cat, subs in earned_courses.items():
+                for name, credit in subs:
+                    f.write(f"{cat} {name} {credit}\n")
+        st.success(f"💾 データを保存しました！（{filename}）")
+    else:
+        st.warning("⚠ 学籍番号を入力するとデータを保存できます。")
