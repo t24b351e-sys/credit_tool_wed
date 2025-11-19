@@ -5,7 +5,17 @@ import re
 from tool import read_requirements, read_courses, calculate_credits
 
 st.set_page_config(page_title="単位管理ツール", layout="wide")
-st.title("🎓 単位管理ツール（進級／卒業対応版・保存機能つき）")
+st.title(" 単ナビ")
+
+# 表示名
+DISPLAY = {
+    "A":  "A(必修科目)",
+    "B0": "B(専門基礎科目)",
+    "B1": "B(専門応用科目)",
+    "C":  "C(選択科目)",
+    "D":  "D(特殊選択科目)",
+    "E":  "E(自由科目)",
+}
 
 mode = st.radio("要件を選択してください", ["進級要件", "卒業要件"])
 req_file = "requirements2.txt" if mode == "進級要件" else "requirements1.txt"
@@ -15,7 +25,7 @@ student_id = st.text_input("学籍番号を入力してください", placeholde
 
 courses = read_courses("courses.txt")
 
-# 🔄 保存データ読み込み
+# 保存データ読み込み
 loaded_taken = {}
 if student_id:
     filename = f"taken_{student_id}.txt"
@@ -27,7 +37,7 @@ if student_id:
                     continue
                 cat, name, credit = parts
                 loaded_taken.setdefault(cat, []).append(name)
-        st.success("📂 保存されたデータを読み込みました！")
+        st.success(" 保存されたデータを読み込みました！")
     else:
         st.info("ℹ 保存データはありません（初回利用と思われます）。")
 
@@ -38,7 +48,7 @@ earned_courses = {}
 for cat, subject_list in courses.items():
     st.markdown(f"### [{cat}]区分")
 
-    # 🔥 保存済み科目を除外した選択肢
+    #  保存済み科目を除外した選択肢
     taken_names = set(loaded_taken.get(cat, []))
     options = [f"{name}（{credit}単位）" for name, credit in subject_list if name not in taken_names]
 
@@ -62,7 +72,7 @@ for cat, subject_list in courses.items():
 if st.button("結果を表示"):
     earned = calculate_credits(earned_courses)
 
-    st.subheader("📊 結果")
+    st.subheader(" 結果")
     rows = []
     for cat in required:
         need = required[cat]
@@ -71,7 +81,7 @@ if st.button("結果を表示"):
         rows.append({"区分": cat, "必要": need, "取得": got, "残り": remain})
     st.table(pd.DataFrame(rows))
 
-    st.subheader("📚 詳細")
+    st.subheader("詳細")
     for cat in courses:
         taken_now = {name for name, _ in earned_courses.get(cat, [])}
         remaining = [name for name, _ in courses[cat] if name not in taken_now]
@@ -85,6 +95,6 @@ if st.button("結果を表示"):
             for cat, subs in earned_courses.items():
                 for name, credit in subs:
                     f.write(f"{cat} {name} {credit}\n")
-        st.success(f"💾 データを保存しました！（{filename}）")
+        st.success(f" データを保存しました！（{filename}）")
     else:
-        st.warning("⚠ 学籍番号を入力するとデータを保存できます。")
+        st.warning("学籍番号を入力するとデータを保存できます。")
