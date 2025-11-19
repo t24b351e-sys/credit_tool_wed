@@ -52,15 +52,14 @@ for cat in ["A", "B0", "B1", "C", "D", "E"]:
         earned_courses[cat] = []
         continue
 
-    # 保存済み科目は削除できるよう multiselect に表示
-    saved_names = set(loaded_taken.get(cat, []))
-    all_options = [f"{name}（{credit}単位）" for name, credit in subject_list]
+    # 保存済み科目も含めて multiselect に表示
+    taken_names = set(loaded_taken.get(cat, []))
+    options = [f"{name}（{credit}単位）" for name, credit in subject_list]
+    default_selected = [f"{name}（{credit}単位）" for name, credit in subject_list if name in taken_names]
 
-    # multiselect で選択済み科目を削除可能にする
-    default_selected = [f"{name}（{credit}単位）" for name, credit in subject_list if name in saved_names]
     selected = st.multiselect(
         f"{disp(cat)}で取得した講義を選択（チェックを外すと削除）",
-        all_options,
+        options,
         default=default_selected,
         key=f"sel_{cat}"
     )
